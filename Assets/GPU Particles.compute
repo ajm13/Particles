@@ -1,0 +1,226 @@
+﻿#pragma kernel Gravity
+#pragma kernel Swarm
+
+#pragma kernel ZeroBuffers
+#pragma kernel CountBins
+#pragma kernel CopyCounts
+#pragma kernel ScanIter
+#pragma kernel SwapBuffers
+#pragma kernel SortBins
+
+#include "Particle.cginc"
+#include "SNoise.cginc"
+
+static const float pi = 3.1415926535897932f;
+
+// Particle's data, shared with the shader
+RWStructuredBuffer<Particle> particles;
+
+// Variables set from the CPU
+bool paused, lff, rff, useOpt;
+uint numParticles;
+float time, deltaTime;
+float4 g1, g2;
+float3 v1, v2;
+
+float speed, maxForce, radius, fov, randomness;
+float aSight, cSight, sSight;
+float aWeight, cWeight, sWeight, lr, rr;
+
+// include after all shared vars are defined
+#include "NNS.cginc"
+
+float3 limit(float3 v, float r)
+{
+    return min(r, length(v)) * normalize(v);
+}
+
+[numthreads(256, 1, 1)]
+void Gravity(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    float3 delta, force;
+    float3 cvel;
+    float dist;
+    
+    cvel = (float3) 0;
+    force = (float3) 0;
+    float declump = frac(sin(id.x) + sin(id.y));
+
+    delta = g1.xyz - particles[i].pos;
+    dist = length(delta);
+    force += g1.w * normalize(delta) / (dist + declump + 1.0f);
+    if (lff && dist < 1.0f) cvel += v1 / (dist + 0.1f);
+
+    delta = g2.xyz - particles[i].pos;
+    dist = length(delta);
+    force += g2.w * normalize(delta) / (dist + declump + 1.0f);
+    if (rff && dist < 1.0f) cvel += v2 / (dist + 0.1f);
+
+    particles[i].vel += 0.5 * force + cvel;
+    particles[i].vel *= 0.97f;
+    particles[i].pos += particles[i].vel * deltaTime;
+
+    if (length(particles[i].vel) > 0.1f)
+        particles[i].col = normalize(abs(particles[i].vel));
+}
+
+[numthreads(256, 1, 1)]
+void Swarm(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x, j, k, bid, len;
+    int bin;
+    float dist, invdist, a, r;
+    float3 pos, vel, delta;
+    float3 ali, coh, sep;
+    uint an = 0, cn = 0, sn = 0;
+    float maxSight = max(aSight, max(cSight, sSight));
+    float aw = 0, cw = 0;
+
+    Particle p = particles[i], q;
+
+    pos = p.pos;
+    vel = p.vel;
+    
+    ali = (float3) 0;
+    coh = (float3) 0;
+    sep = (float3) 0;
+    
+    int nns[27];
+    GetNNBins(p.bin, nns, pos, maxSight);
+
+    if (useOpt) {
+        for (j = 0; j < 27; j++) {
+            bin = nns[j];
+
+            if (bin < 0)
+                continue;
+            
+            len = binCounts[bin];
+            bid = binIds[bin];
+    
+            for (k = 0; k < len; k++) {
+                q = nnsBins[bid + k];
+                delta = q.pos - pos;
+
+                if (any(delta) && !any(delta > maxSight)) {
+                    dist = length(delta);
+                    invdist = 1 / dist;
+                    a = acos(dot(normalize(delta), normalize(vel)));
+            
+                    if (a < fov / 360 * pi) {
+                        if (dist < aSight && ++an > 0) {
+                            aw += invdist;
+                            ali += q.vel * invdist;
+                        }
+                        if (dist < cSight && ++cn > 0) {
+                            cw += invdist;
+                            coh += q.pos * invdist;
+                        }
+                        if (dist < sSight && ++sn > 0)
+                            sep += -normalize(delta) * invdist;
+                    }
+                }
+            }
+        }
+    }
+    
+    else {
+        for (j = 0; j < numParticles; j++) {
+            delta = particles[j].pos - pos;
+
+            if (any(delta) && !any(delta > maxSight)) {
+                dist = length(delta);
+                a = acos(dot(normalize(delta), normalize(vel)));
+            
+                if (a < fov / 360 * pi) {
+                    if (dist < aSight && ++an > 0)
+                        ali += particles[j].vel;
+                    if (dist < cSight && ++cn > 0)
+                        coh += particles[j].pos;
+                    if (dist < sSight && ++sn > 0)
+                        sep += -normalize(delta) / dist;
+                }
+            }
+        }
+    }
+
+    // if (any(vec)) prevents normalizing if vec is 0
+
+    if (an > 0 && any(ali)) {
+        ali = speed * normalize(ali / aw);
+        ali = aWeight * limit(ali - vel, maxForce);
+    }
+
+    if (cn > 0 && any(coh)) {
+        coh = speed * normalize(coh / cw - pos);
+        coh = cWeight * limit(coh - vel, maxForce);
+    }
+
+    if (sn > 0 && any(sep)) {
+        sep = speed * normalize(sep / sn);
+        sep = sWeight * limit(sep - vel, maxForce);
+    }
+    
+    vel += randomness * snoise(float4(pos, time));
+    // vel += randomness * (1.0f - 2.0f * (float3)
+        // snoise(pos + time * float3(0.37f, 0.41f, 0.53f)));
+
+    vel = limit(vel + ali + coh + sep, speed);
+    
+    if (!paused)
+        pos += vel;
+
+    r = max(0.05f, lr - 0.15f * g1.w);
+    delta = g1.xyz - pos;
+    dist = length(delta);
+    if (lff && dist < r + 0.05f)
+        pos = g1.xyz - r * normalize(delta) + v1;
+    
+    r = max(0.05f, rr - 0.15f * g2.w);
+    delta = g2.xyz - pos;
+    dist = length(delta);
+    if (rff && dist < r + 0.05f)
+        pos = g2.xyz - r * normalize(delta) + v2;
+    
+
+    // cube bounds
+    // if (pos.x >= radius) {
+    //     pos.x = radius;
+    //     vel = reflect(vel, float3(-1, 0, 0));
+    // }
+    // if (pos.x <= -radius) {
+    //     pos.x = -radius;
+    //     vel = reflect(vel, float3(1, 0, 0));
+    // }
+    // if (pos.y >= radius) {
+    //     pos.y = radius;
+    //     vel = reflect(vel, float3(0, -1, 0));
+    // }
+    // if (pos.y <= -radius) {
+    //     pos.y = -radius;
+    //     vel = reflect(vel, float3(0, 1, 0));
+    // }
+    // if (pos.z >= radius) {
+    //     pos.z = radius;
+    //     vel = reflect(vel, float3(0, 0, -1));
+    // }
+    // if (pos.z <= -radius) {
+    //     pos.z = -radius;
+    //     vel = reflect(vel, float3(0, 0, 1));
+    // }
+    
+    dist = radius - length(pos);
+    if (dist <= 0) {
+        //delta = -speed * normalize(pos) / max(0.001f, dist);
+        //vel = limit(vel + limit(delta - vel, maxForce * 2), speed);
+        vel = reflect(vel, -normalize(pos));
+        pos = limit(pos, radius);
+    }
+    
+    particles[i].pos = pos;
+    if (!paused) {
+        particles[i].vel = vel;
+        particles[i].col = normalize(abs(vel));
+    }
+}
