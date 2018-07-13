@@ -7,15 +7,13 @@ RWStructuredBuffer<int> binIds;
 RWStructuredBuffer<Particle> nnsBins;
 
 [numthreads(256, 1, 1)]
-void ZeroBuffers(uint3 id : SV_DispatchThreadID)
-{
+void ZeroBuffers(uint3 id : SV_DispatchThreadID) {
     binCounts[id.x] = 0;
     temp[id.x] = 0;
 }
 
 [numthreads(256, 1, 1)]
-void CountBins(uint3 id : SV_DispatchThreadID)
-{
+void CountBins(uint3 id : SV_DispatchThreadID) {
     uint i = id.x, bid;
 
     if (i >= numParticles)
@@ -33,26 +31,22 @@ void CountBins(uint3 id : SV_DispatchThreadID)
 uint o;
 
 [numthreads(256, 1, 1)]
-void CopyCounts(uint id : SV_DispatchThreadID)
-{
+void CopyCounts(uint id : SV_DispatchThreadID) {
     temp[id.x] = (id.x > 0) ? binCounts[id.x - 1] : 0;
 }
 
 [numthreads(256, 1, 1)]
-void ScanIter(uint id : SV_DispatchThreadID)
-{
+void ScanIter(uint id : SV_DispatchThreadID) {
     binIds[id.x] = temp[id.x] + ((id.x >= o) ? temp[id.x - o] : 0);
 }
 
 [numthreads(256, 1, 1)]
-void SwapBuffers(uint id : SV_DispatchThreadID)
-{
+void SwapBuffers(uint id : SV_DispatchThreadID) {
     temp[id.x] = binIds[id.x];
 }
 
 [numthreads(256, 1, 1)]
-void SortBins(uint3 id : SV_DispatchThreadID)
-{
+void SortBins(uint3 id : SV_DispatchThreadID) {
     uint i = id.x;
     if (i >= numParticles)
         return;
@@ -61,8 +55,7 @@ void SortBins(uint3 id : SV_DispatchThreadID)
     nnsBins[bid + particles[i].id] = particles[i];
 }
 
-void GetNNBins(uint bin, out int bins[27], float3 pos, float r)
-{
+void GetNNBins(uint bin, out int bins[27], float3 pos, float r) {
     uint3 bin3d = (uint3) 0;
     bin3d.x = bin % gridWidth;
     bin3d.y = (bin / gridWidth) % gridWidth;
