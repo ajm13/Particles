@@ -50,18 +50,18 @@ void Gravity(uint3 id : SV_DispatchThreadID)
     delta = g1.xyz - particles[i].pos;
     dist = length(delta);
     force += g1.w * normalize(delta) / (dist + declump + 1.0f);
-    if (lff && dist < 1.0f) cvel += v1 / (dist + 0.1f);
+    if (lff) cvel += v1 / (dist + 0.1f);
 
     delta = g2.xyz - particles[i].pos;
     dist = length(delta);
     force += g2.w * normalize(delta) / (dist + declump + 1.0f);
-    if (rff && dist < 1.0f) cvel += v2 / (dist + 0.1f);
+    if (rff) cvel += v2 / (dist + 0.1f);
 
     particles[i].vel += 0.5 * force + cvel;
     particles[i].vel *= 0.97f;
     particles[i].pos += particles[i].vel * deltaTime;
 
-    if (length(particles[i].vel) > 0.1f)
+    if (length(particles[i].vel) > 0.2f)
         particles[i].col = normalize(abs(particles[i].vel));
 }
 
