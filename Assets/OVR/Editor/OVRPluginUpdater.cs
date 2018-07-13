@@ -70,11 +70,11 @@ class OVRPluginUpdater
 		return new PluginPackage()
 		{
 			RootPath = rootPath,
-			Version = GetPluginVersion(rootPath + GetPluginBuildTargetSubPath(BuildTarget.StandaloneWindows64)),
+			Version = GetPluginVersion(rootPath),
 			Plugins = new Dictionary<BuildTarget, string>()
 			{
 				{ BuildTarget.Android, rootPath + GetPluginBuildTargetSubPath(BuildTarget.Android) },
-				{ BuildTarget.StandaloneOSXUniversal, rootPath + GetPluginBuildTargetSubPath(BuildTarget.StandaloneOSXUniversal) },
+				{ BuildTarget.StandaloneOSX, rootPath + GetPluginBuildTargetSubPath(BuildTarget.StandaloneOSX) },
 				{ BuildTarget.StandaloneWindows, rootPath + GetPluginBuildTargetSubPath(BuildTarget.StandaloneWindows) },
 				{ BuildTarget.StandaloneWindows64, rootPath + GetPluginBuildTargetSubPath(BuildTarget.StandaloneWindows64) },
 			}
@@ -146,7 +146,7 @@ class OVRPluginUpdater
 			case BuildTarget.Android:
 				path = @"/Android/OVRPlugin.aar";
 				break;
-			case BuildTarget.StandaloneOSXUniversal:
+			case BuildTarget.StandaloneOSX:
 				path = @"/OSXUniversal/OVRPlugin.bundle";
 				break;
 			case BuildTarget.StandaloneWindows:
@@ -169,19 +169,41 @@ class OVRPluginUpdater
 
 	private static System.Version GetPluginVersion(string path)
 	{
-		if (!File.Exists(path))
+		System.Version invalidVersion = new System.Version("0.0.0");
+		System.Version pluginVersion = invalidVersion;
+
+		try
 		{
-			path += GetDisabledPluginSuffix();
-			if (!File.Exists(path))
-			{
-				return new System.Version("0.0.0");
-			}
+			pluginVersion = new System.Version(Path.GetFileName(path));
+		}
+		catch
+		{
+			pluginVersion = invalidVersion;
 		}
 
-		FileVersionInfo pluginVersionInfo = FileVersionInfo.GetVersionInfo(path);
-		if (pluginVersionInfo == null || pluginVersionInfo.ProductVersion == null || pluginVersionInfo.ProductVersion == "")
-			return new System.Version("0.0.0");
-		return new System.Version(pluginVersionInfo.ProductVersion);
+		if (pluginVersion == invalidVersion)
+		{
+			//Unable to determine version from path, fallback to Win64 DLL meta data
+			path += GetPluginBuildTargetSubPath(BuildTarget.StandaloneWindows64);
+			if (!File.Exists(path))
+			{
+				path += GetDisabledPluginSuffix();
+				if (!File.Exists(path))
+				{
+					return invalidVersion;
+				}
+			}
+
+			FileVersionInfo pluginVersionInfo = FileVersionInfo.GetVersionInfo(path);
+			if (pluginVersionInfo == null || pluginVersionInfo.ProductVersion == null || pluginVersionInfo.ProductVersion == "")
+			{
+				return invalidVersion;
+			}
+
+			pluginVersion = new System.Version(pluginVersionInfo.ProductVersion);
+		}
+
+		return pluginVersion;
 	}
 	
 	private static bool ShouldAttemptPluginUpdate()
@@ -240,17 +262,17 @@ class OVRPluginUpdater
 					case BuildTarget.Android:
 						pi.SetCompatibleWithPlatform(BuildTarget.Android, true);
 						pi.SetPlatformData(BuildTarget.Android, "CPU", "ARMv7");
-						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXUniversal, false);
+						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSX, false);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXIntel, false);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXIntel64, false);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows, false);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows64, false);
 						pi.SetCompatibleWithEditor(false);
 						break;
-					case BuildTarget.StandaloneOSXUniversal:
+					case BuildTarget.StandaloneOSX:
 						pi.SetCompatibleWithPlatform(BuildTarget.Android, false);
 						pi.SetPlatformData(BuildTarget.Android, "CPU", "ARMv7");
-						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXUniversal, true);
+						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSX, true);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXIntel, true);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXIntel64, true);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows, false);
@@ -264,7 +286,7 @@ class OVRPluginUpdater
 					case BuildTarget.StandaloneWindows:
 						pi.SetCompatibleWithPlatform(BuildTarget.Android, false);
 						pi.SetPlatformData(BuildTarget.Android, "CPU", "ARMv7");
-						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXUniversal, false);
+						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSX, false);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXIntel, false);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXIntel64, false);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows, true);
@@ -278,7 +300,7 @@ class OVRPluginUpdater
 					case BuildTarget.StandaloneWindows64:
 						pi.SetCompatibleWithPlatform(BuildTarget.Android, false);
 						pi.SetPlatformData(BuildTarget.Android, "CPU", "ARMv7");
-						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXUniversal, false);
+						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSX, false);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXIntel, false);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneOSXIntel64, false);
 						pi.SetCompatibleWithPlatform(BuildTarget.StandaloneWindows, false);
@@ -306,11 +328,11 @@ class OVRPluginUpdater
 	private static bool autoUpdateEnabled
 	{
 		get {
-			return EditorPrefs.GetBool(autoUpdateEnabledKey, true);
+			return PlayerPrefs.GetInt(autoUpdateEnabledKey, 1) == 1;
 		}
 
 		set {
-			EditorPrefs.SetBool(autoUpdateEnabledKey, value);
+			PlayerPrefs.SetInt(autoUpdateEnabledKey, value ? 1 : 0);
 		}
 	}
 
